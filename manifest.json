@@ -1,9 +1,9 @@
 {
-  "name": "智慧藥盒",
-  "short_name": "智慧藥盒AI",
-  "description": "",
-  "start_url": "/medbox/",
-  "scope": "/medbox/",
+  "name": "智慧用藥盒子AI",
+  "short_name": "智慧用藥盒子AI",
+  "description": "智慧用藥盒子AI",
+  "start_url": "/PWA-PACKER/",
+  "scope": "/PWA-PACKER/",
   "display": "standalone",
   "orientation": "any",
   "theme_color": "#1a73e8",
@@ -14,9 +14,9 @@
   ],
   "shortcuts": [
     {
-      "name": "開啟 智慧藥盒AI",
-      "short_name": "智慧藥盒AI",
-      "url": "/medbox/",
+      "name": "開啟 智慧用藥盒子AI",
+      "short_name": "智慧用藥盒子AI",
+      "url": "/PWA-PACKER/",
       "icons": [
         {
           "src": "icon-192.png",
