@@ -1025,10 +1025,41 @@ function renderTodayPickup(){
     '<div style="height:4px"></div>';
 }
 
+function saveTodayDone(){
+  try{ localStorage.setItem('mm_today_done_'+todayStr(), JSON.stringify(todayDone)); }catch(e){}
+}
+function loadTodayDone(){
+  try{
+    var saved = JSON.parse(localStorage.getItem('mm_today_done_'+todayStr())||'[]');
+    return Array.isArray(saved) ? saved : [];
+  }catch(e){ return []; }
+}
+
+// 扣減/恢復庫存（qty 為正數=扣減，負數=恢復）
+function deductStock(medId, qty){
+  try {
+    var appts = getData();
+    var changed = false;
+    for(var ai=0; ai<appts.length; ai++){
+      var rxList = appts[ai].rxList || [];
+      for(var ri=0; ri<rxList.length; ri++){
+        var meds = rxList[ri].meds || [];
+        for(var mi=0; mi<meds.length; mi++){
+          if(meds[mi].id === medId){
+            meds[mi].stockQty = Math.max(0, (meds[mi].stockQty||0) - qty);
+            changed = true;
+          }
+        }
+      }
+    }
+    if(changed) saveData(appts);
+  } catch(e){ console.log('[Stock] 扣減失敗:', e); }
+}
+
 function renderTodayMeds(){
   var container=document.getElementById('todayMedSections');
   container.innerHTML='';
-  todayDone=[];
+  todayDone = loadTodayDone(); // ← 從 localStorage 恢復
 
   /* 統一從 getData() 的 rxList.meds 讀取，避免重複 */
   var meds=[];
@@ -1159,16 +1190,21 @@ function renderTodayMeds(){
             card2.classList.remove('pending','warn');card2.classList.add('done');
             btn2.classList.add('checked');btn2.textContent='✓';btn2.classList.remove('warn-btn');
             showToast('✓ 已記錄服藥');
+            // 扣減庫存
+            deductStock(mId, 1);
           } else {
             todayDone.splice(idx,1);
             card2.classList.remove('done');card2.classList.add(mIsWarn?'warn':'pending');
             btn2.classList.remove('checked');btn2.textContent='○';
             if(mIsWarn)btn2.classList.add('warn-btn');
             showToast('↩ 已取消服藥記錄');
+            // 恢復庫存
+            deductStock(mId, -1);
           }
+          saveTodayDone(); // ← 存入 localStorage
+          updateProgress();
           // 服藥狀態更新後重新同步到 Worker
           setTimeout(syncMedicineToWorker, 500);
-          updateProgress();
         }
         cardDiv.onclick=doToggle;
         cardDiv.querySelector('.check-btn').onclick=function(e){e.stopPropagation();doToggle();};
@@ -2048,53 +2084,6 @@ renderCabinet();
   }
 })();
 setTimeout(nCheck,2000);
-setTimeout(syncMedicineToWorker, 3000); // App 開啟時同步藥品資料到 Worker
-
-// ── 同步藥品資料到 Cloudflare Worker KV ──────────────────
-function syncMedicineToWorker(){
-  try {
-    var u = currentUser();
-    if(!u || (!u.lineId && !u.email)) return; // 沒有通知設定，不需同步
-    var appts = getData();
-    // 收集所有藥品
-    var meds = [];
-    for(var ai=0; ai<appts.length; ai++){
-      var rxList = appts[ai].rxList || [];
-      for(var ri=0; ri<rxList.length; ri++){
-        var medArr = rxList[ri].meds || [];
-        for(var mi=0; mi<medArr.length; mi++){
-          var m = medArr[mi];
-          meds.push({
-            id:       m.id || ('m_'+ai+'_'+ri+'_'+mi),
-            name:     m.name,
-            freq:     m.freq || 'QD',
-            timing:   m.timing || '飯後',
-            stockQty: m.stockQty || 0,
-            dailyDose: m.dailyDose || 1,
-          });
-        }
-      }
-    }
-    if(!meds.length) return;
-    // 取得今天已完成的記錄
-    var today = todayStr();
-    fetch(WORKER+'/sync-medicine',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        userId:    String(currentUserId),
-        lineToken: u.lineToken || null,
-        lineId:    u.lineId    || null,
-        email:     u.email     || null,
-        meds:      meds,
-        todayDone: todayDone || [],
-        today:     today
-      })
-    }).then(function(r){ return r.json(); })
-      .then(function(d){ if(d.success) console.log('[MedSync] 藥品資料已同步'); })
-      .catch(function(e){ console.log('[MedSync] 同步失敗:', e); });
-  } catch(e){ console.log('[MedSync] 錯誤:', e); }
-}
 
 /* Modal overlay 背景點擊關閉（iOS 相容版）*/
 (function(){
