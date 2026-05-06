@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>智慧藥管家</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
@@ -638,12 +639,37 @@ body{font-family:-apple-system,sans-serif;background:#f0ede8;color:#1c1917;displ
         </div>
       </div>
       <div style="height:1px;background:var(--border);margin-bottom:14px"></div>
-      <div class="form-group"><div class="form-label">📧 本人 Email（接收通知）</div><input class="form-input" id="uf-email" type="email" placeholder="用藥者本人信箱" maxlength="60"></div>
+      <div class="form-group">
+        <div class="form-label">📧 本人 Email（接收通知）</div>
+        <input class="form-input" id="uf-email" type="email" placeholder="用藥者本人信箱" maxlength="60">
+        <button id="uf-test-email-self" style="width:100%;margin-top:7px;padding:9px;border-radius:9px;border:none;background:#e0f2fe;color:#0369a1;font-size:12.5px;font-weight:700;cursor:pointer">📧 測試發送（本人）</button>
+        <div id="uf-test-self-result" style="font-size:12px;margin-top:5px;display:none"></div>
+      </div>
       <div class="form-group"><div class="form-label">🆘 緊急聯絡人姓名</div><input class="form-input" id="uf-ec-name" type="text" placeholder="例：曾小明" maxlength="20"></div>
-      <div class="form-group"><div class="form-label">📧 緊急聯絡人 Email</div><input class="form-input" id="uf-ec-email" type="email" placeholder="子女或照護者信箱" maxlength="60"><div class="ec-hint">漏服藥、庫存緊急時自動副本通知</div></div>
+      <div class="form-group">
+        <div class="form-label">📧 緊急聯絡人 Email</div>
+        <input class="form-input" id="uf-ec-email" type="email" placeholder="子女或照護者信箱" maxlength="60">
+        <div class="ec-hint">漏服藥、庫存緊急時自動副本通知</div>
+        <button id="uf-test-email-ec" style="width:100%;margin-top:7px;padding:9px;border-radius:9px;border:none;background:#f0fdf4;color:#15803d;font-size:12.5px;font-weight:700;cursor:pointer">📧 測試發送（緊急聯絡人）</button>
+        <div id="uf-test-ec-result" style="font-size:12px;margin-top:5px;display:none"></div>
+      </div>
       <div style="height:1px;background:var(--border);margin-bottom:12px"></div>
       <div style="font-weight:700;font-size:13px;color:#06c755;margin-bottom:10px">💬 LINE 通知設定</div>
-      <div class="form-group"><div class="form-label">LINE userId</div><input class="form-input" id="uf-line-id" type="text" placeholder="Uxxxxxxxxxxxxxxxxx" maxlength="40"></div>
+      <!-- LINE 登入按鈕 -->
+      <div id="liffLoginArea" style="margin-bottom:12px">
+        <button id="liffLoginBtn" style="width:100%;padding:12px;border-radius:12px;border:none;background:#06c755;color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+          <span style="font-size:18px">💬</span><span>用 LINE 登入自動取得 userId</span>
+        </button>
+        <div id="liffUserCard" style="display:none;background:#f0fdf4;border:1.5px solid #86efac;border-radius:11px;padding:11px 13px;margin-top:8px;display:none;align-items:center;gap:10px">
+          <img id="liffAvatar" src="" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0" alt="">
+          <div style="flex:1;min-width:0">
+            <div id="liffName" style="font-weight:700;font-size:13px;color:#15803d"></div>
+            <div id="liffUidLabel" style="font-size:11px;color:#16a34a;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+          </div>
+          <button id="liffLogoutBtn" style="background:none;border:1px solid #86efac;border-radius:7px;padding:4px 9px;font-size:11px;color:#15803d;cursor:pointer">登出</button>
+        </div>
+      </div>
+      <div class="form-group"><div class="form-label">LINE userId</div><input class="form-input" id="uf-line-id" type="text" placeholder="Uxxxxxxxxxxxxxxxxx（自動填入或手動輸入）" maxlength="40"></div>
       <div class="form-group">
         <div class="form-label">通知方式</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:5px">
@@ -1025,41 +1051,10 @@ function renderTodayPickup(){
     '<div style="height:4px"></div>';
 }
 
-function saveTodayDone(){
-  try{ localStorage.setItem('mm_today_done_'+todayStr(), JSON.stringify(todayDone)); }catch(e){}
-}
-function loadTodayDone(){
-  try{
-    var saved = JSON.parse(localStorage.getItem('mm_today_done_'+todayStr())||'[]');
-    return Array.isArray(saved) ? saved : [];
-  }catch(e){ return []; }
-}
-
-// 扣減/恢復庫存（qty 為正數=扣減，負數=恢復）
-function deductStock(medId, qty){
-  try {
-    var appts = getData();
-    var changed = false;
-    for(var ai=0; ai<appts.length; ai++){
-      var rxList = appts[ai].rxList || [];
-      for(var ri=0; ri<rxList.length; ri++){
-        var meds = rxList[ri].meds || [];
-        for(var mi=0; mi<meds.length; mi++){
-          if(meds[mi].id === medId){
-            meds[mi].stockQty = Math.max(0, (meds[mi].stockQty||0) - qty);
-            changed = true;
-          }
-        }
-      }
-    }
-    if(changed) saveData(appts);
-  } catch(e){ console.log('[Stock] 扣減失敗:', e); }
-}
-
 function renderTodayMeds(){
   var container=document.getElementById('todayMedSections');
   container.innerHTML='';
-  todayDone = loadTodayDone(); // ← 從 localStorage 恢復
+  todayDone=[];
 
   /* 統一從 getData() 的 rxList.meds 讀取，避免重複 */
   var meds=[];
@@ -1190,21 +1185,14 @@ function renderTodayMeds(){
             card2.classList.remove('pending','warn');card2.classList.add('done');
             btn2.classList.add('checked');btn2.textContent='✓';btn2.classList.remove('warn-btn');
             showToast('✓ 已記錄服藥');
-            // 扣減庫存
-            deductStock(mId, 1);
           } else {
             todayDone.splice(idx,1);
             card2.classList.remove('done');card2.classList.add(mIsWarn?'warn':'pending');
             btn2.classList.remove('checked');btn2.textContent='○';
             if(mIsWarn)btn2.classList.add('warn-btn');
             showToast('↩ 已取消服藥記錄');
-            // 恢復庫存
-            deductStock(mId, -1);
           }
-          saveTodayDone(); // ← 存入 localStorage
           updateProgress();
-          // 服藥狀態更新後重新同步到 Worker
-          setTimeout(syncMedicineToWorker, 500);
         }
         cardDiv.onclick=doToggle;
         cardDiv.querySelector('.check-btn').onclick=function(e){e.stopPropagation();doToggle();};
@@ -1935,7 +1923,7 @@ function nCheck(){
   function next(){
     if(i>=msgs.length)return;var msg=msgs[i];i++;
     nSendEmail(msg.subject,msg.body,msg.urgent)
-      .then(function(resp){if(resp&&resp.id){nMark(msg.key);console.log('[Notify] '+msg.subject);}})
+      .then(function(resp){if(resp&&(resp.id||resp.ok)){nMark(msg.key);console.log('[Notify] '+msg.subject);}})
       .catch(function(){})
       .then(function(){setTimeout(next,800);});
   }
@@ -2069,6 +2057,8 @@ function saveAddMed(){
 renderTodayMeds();
 renderTodayPickup();
 renderCabinet();
+/* LIFF 初始化（背景）*/
+setTimeout(function(){initLiff();},500);
 
 /* 藥箱刪除按鈕：事件委派（在 DOM 準備好後綁定）*/
 (function(){
@@ -2342,6 +2332,129 @@ function aiSend(){
 }
 
 
+
+/* ════ LIFF 整合 ════ */
+var LIFF_ID = '2009889780-TZHWMLSB';
+var _liffReady = false;
+var _liffProfile = null;
+
+function initLiff(){
+  if(_liffReady) return;
+  if(typeof liff === 'undefined'){
+    console.log('[LIFF] SDK not loaded');
+    return;
+  }
+  liff.init({liffId: LIFF_ID})
+    .then(function(){
+      _liffReady = true;
+      console.log('[LIFF] Ready, loggedIn:', liff.isLoggedIn());
+      if(liff.isLoggedIn()){
+        fetchLiffProfile();
+      }
+      updateLiffUI();
+    })
+    .catch(function(e){
+      console.log('[LIFF] Init error:', e);
+    });
+}
+
+function fetchLiffProfile(){
+  liff.getProfile()
+    .then(function(profile){
+      _liffProfile = profile;
+      console.log('[LIFF] userId:', profile.userId);
+      /* 自動填入 userId */
+      var inp = document.getElementById('uf-line-id');
+      if(inp && !inp.value) inp.value = profile.userId;
+      /* 儲存到當前用戶 */
+      var u = loadUserProfile(currentUserId);
+      if(!u.lineId){
+        u.lineId = profile.userId;
+        saveUserProfile(currentUserId, u);
+        profile_obj_update_lineid(profile.userId);
+      }
+      updateLiffUI();
+    })
+    .catch(function(e){ console.log('[LIFF] getProfile error:', e); });
+}
+
+function profile_obj_update_lineid(uid){
+  /* 同步更新 profile 物件 */
+  profile.lineId = uid;
+}
+
+function updateLiffUI(){
+  var loginBtn = document.getElementById('liffLoginBtn');
+  var userCard = document.getElementById('liffUserCard');
+  if(!loginBtn || !userCard) return;
+  if(_liffReady && liff.isLoggedIn() && _liffProfile){
+    loginBtn.style.display = 'none';
+    userCard.style.display = 'flex';
+    var avatar = document.getElementById('liffAvatar');
+    var nameEl = document.getElementById('liffName');
+    var uidEl = document.getElementById('liffUidLabel');
+    if(avatar) avatar.src = _liffProfile.pictureUrl || '';
+    if(nameEl) nameEl.textContent = _liffProfile.displayName || '';
+    if(uidEl) uidEl.textContent = 'userId: ' + _liffProfile.userId;
+    var inp = document.getElementById('uf-line-id');
+    if(inp) inp.value = _liffProfile.userId;
+  } else {
+    loginBtn.style.display = 'flex';
+    userCard.style.display = 'none';
+  }
+}
+
+function doLiffLogin(){
+  if(!_liffReady){
+    showToast('⚠ LIFF 初始化中，請稍後再試');
+    return;
+  }
+  if(liff.isLoggedIn()){
+    fetchLiffProfile();
+    return;
+  }
+  /* 部署環境：用 liff.login() */
+  liff.login({redirectUri: window.location.href});
+}
+
+function doLiffLogout(){
+  if(!_liffReady) return;
+  liff.logout();
+  _liffProfile = null;
+  var inp = document.getElementById('uf-line-id');
+  if(inp) inp.value = '';
+  updateLiffUI();
+  showToast('已登出 LINE');
+}
+
+/* 開啟 userForm 時更新 LIFF UI */
+var _origOpenUserForm = openUserForm;
+openUserForm = function(uid){
+  _origOpenUserForm(uid);
+  /* 初始化 LIFF（若尚未初始化）*/
+  setTimeout(function(){
+    initLiff();
+    updateLiffUI();
+    /* 綁定按鈕 */
+    var loginBtn = document.getElementById('liffLoginBtn');
+    var logoutBtn = document.getElementById('liffLogoutBtn');
+    if(loginBtn && !loginBtn._liffBound){
+      loginBtn._liffBound = true;
+      loginBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        doLiffLogin();
+      }, false);
+    }
+    if(logoutBtn && !logoutBtn._liffBound){
+      logoutBtn._liffBound = true;
+      logoutBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        doLiffLogout();
+      }, false);
+    }
+  }, 200);
+};
+
 window.MedNotify={check:nCheck};
 
 /* ════ 多用戶管理系統 ════ */
@@ -2518,6 +2631,55 @@ function deleteCurrentUser(){
         e.stopPropagation();clearUserData();
       },false);
     }
+    /* 測試發送按鈕 */
+    var testSelfBtn=document.getElementById('uf-test-email-self');
+    if(testSelfBtn){
+      testSelfBtn.addEventListener('click',function(e){
+        e.stopPropagation();
+        var email=document.getElementById('uf-email').value.trim();
+        var resultEl=document.getElementById('uf-test-self-result');
+        if(!email){resultEl.style.display='block';resultEl.style.color='#dc2626';resultEl.textContent='⚠ 請先填入 Email';return;}
+        testSelfBtn.disabled=true;testSelfBtn.textContent='發送中...';
+        fetch(WORKER+'/send-email',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({to:email,subject:'💊 智慧藥管家測試郵件',message:'這是來自智慧藥管家的測試郵件，Email 通知正常運作！
+
+您將在服藥提醒時收到此類通知。'})
+        }).then(function(r){return r.json();})
+        .then(function(d){
+          resultEl.style.display='block';
+          if(d.ok||d.id){resultEl.style.color='#15803d';resultEl.textContent='✅ 測試郵件已發送！';}
+          else{resultEl.style.color='#dc2626';resultEl.textContent='❌ 發送失敗：'+JSON.stringify(d);}
+          testSelfBtn.disabled=false;testSelfBtn.textContent='📧 測試發送（本人）';
+        }).catch(function(e){
+          resultEl.style.display='block';resultEl.style.color='#dc2626';resultEl.textContent='❌ 網路錯誤：'+e.message;
+          testSelfBtn.disabled=false;testSelfBtn.textContent='📧 測試發送（本人）';
+        });
+      },false);
+    }
+    var testEcBtn=document.getElementById('uf-test-email-ec');
+    if(testEcBtn){
+      testEcBtn.addEventListener('click',function(e){
+        e.stopPropagation();
+        var email=document.getElementById('uf-ec-email').value.trim();
+        var resultEl=document.getElementById('uf-test-ec-result');
+        if(!email){resultEl.style.display='block';resultEl.style.color='#dc2626';resultEl.textContent='⚠ 請先填入緊急聯絡人 Email';return;}
+        testEcBtn.disabled=true;testEcBtn.textContent='發送中...';
+        fetch(WORKER+'/send-email',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({to:email,subject:'[副本] 💊 智慧藥管家緊急聯絡人測試',message:'這是來自智慧藥管家的測試郵件。
+
+當用藥者漏服藥或庫存緊急時，您將收到此類通知。'})
+        }).then(function(r){return r.json();})
+        .then(function(d){
+          resultEl.style.display='block';
+          if(d.ok||d.id){resultEl.style.color='#15803d';resultEl.textContent='✅ 測試郵件已發送！';}
+          else{resultEl.style.color='#dc2626';resultEl.textContent='❌ 發送失敗：'+JSON.stringify(d);}
+          testEcBtn.disabled=false;testEcBtn.textContent='📧 測試發送（緊急聯絡人）';
+        }).catch(function(e){
+          resultEl.style.display='block';resultEl.style.color='#dc2626';resultEl.textContent='❌ 網路錯誤：'+e.message;
+          testEcBtn.disabled=false;testEcBtn.textContent='📧 測試發送（緊急聯絡人）';
+        });
+      },false);
+    }
 
     /* userForm 所有按鈕事件 */
     function bindEl(id,fn){var el=document.getElementById(id);if(el)el.addEventListener('click',function(e){e.stopPropagation();fn(e);},false);}
@@ -2573,6 +2735,9 @@ function deleteCurrentUser(){
 
 window.renderTodayPickup=renderTodayPickup;
 window.aiSend=aiSend;
+window.initLiff=initLiff;
+window.doLiffLogin=doLiffLogin;
+window.doLiffLogout=doLiffLogout;
 window.initAiPage=initAiPage;
 window.deleteAppt=deleteAppt;
 window.openLineHelper=openLineHelper;
