@@ -2,8 +2,8 @@
   "name": "智慧用藥盒子AI",
   "short_name": "智慧用藥盒子AI",
   "description": "智慧用藥盒子AI",
-  "start_url": "/PWA-PACKER/",
-  "scope": "/PWA-PACKER/",
+  "start_url": "/medbox/",
+  "scope": "/medbox/",
   "display": "standalone",
   "orientation": "any",
   "theme_color": "#1a73e8",
@@ -16,7 +16,7 @@
     {
       "name": "開啟 智慧用藥盒子AI",
       "short_name": "智慧用藥盒子AI",
-      "url": "/PWA-PACKER/",
+      "url": "/medbox/",
       "icons": [
         {
           "src": "icon-192.png",
