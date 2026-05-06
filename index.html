@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
 <title>智慧藥管家</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
@@ -2643,9 +2641,7 @@ function deleteCurrentUser(){
         if(!email){resultEl.style.display='block';resultEl.style.color='#dc2626';resultEl.textContent='⚠ 請先填入 Email';return;}
         testSelfBtn.disabled=true;testSelfBtn.textContent='發送中...';
         fetch(WORKER+'/send-email',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({to:email,subject:'💊 智慧藥管家測試郵件',message:'這是來自智慧藥管家的測試郵件，Email 通知正常運作！
-
-您將在服藥提醒時收到此類通知。'})
+          body:JSON.stringify({to:email,subject:'💊 智慧藥管家測試郵件',message:'這是來自智慧藥管家的測試郵件，Email 通知正常運作！\n\n您將在服藥提醒時收到此類通知。'})
         }).then(function(r){return r.json();})
         .then(function(d){
           resultEl.style.display='block';
@@ -2667,9 +2663,7 @@ function deleteCurrentUser(){
         if(!email){resultEl.style.display='block';resultEl.style.color='#dc2626';resultEl.textContent='⚠ 請先填入緊急聯絡人 Email';return;}
         testEcBtn.disabled=true;testEcBtn.textContent='發送中...';
         fetch(WORKER+'/send-email',{method:'POST',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({to:email,subject:'[副本] 💊 智慧藥管家緊急聯絡人測試',message:'這是來自智慧藥管家的測試郵件。
-
-當用藥者漏服藥或庫存緊急時，您將收到此類通知。'})
+          body:JSON.stringify({to:email,subject:'[副本] 💊 智慧藥管家緊急聯絡人測試',message:'這是來自智慧藥管家的測試郵件。\n\n當用藥者漏服藥或庫存緊急時，您將收到此類通知。'})
         }).then(function(r){return r.json();})
         .then(function(d){
           resultEl.style.display='block';
