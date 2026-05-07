@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
 <title>智慧藥管家</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
@@ -930,7 +928,19 @@ function todayStr(){return dateToYMD(new Date());}
 function daysFrom(d){if(!d||d==='undefined')return 9999;var n=new Date();n.setHours(0,0,0,0);var t=new Date(d);if(isNaN(t.getTime()))return 9999;t.setHours(0,0,0,0);return Math.round((t-n)/86400000);}
 function stockSt(m){var d=m.stockQty/m.dailyDose;return d<5?'red':d<10?'amber':'ok';}
 function freqLbl(f){return{QD:'每日1次',BID:'每日2次',TID:'每日3次',QID:'每日4次',PRN:'需要時'}[f]||f;}
-function pickupWin(rx,n){var base=addDays(rx.startDate,n*(rx.daysPerPickup||28));return{earliest:addDays(base,-(rx.earlyDays||10)),latest:addDays(base,3)};}
+function pickupWin(rx,n){
+  var days=rx.daysPerPickup||28;
+  var early=rx.earlyDays||10;
+  var start=rx.startDate;
+  if(n===0){
+    /* 第1次：就診當天直接領，當天到就診後3天內有效 */
+    return{earliest:start, latest:addDays(start,3)};
+  }
+  /* 第N次（n>=1）：上一次藥吃完前 early 天起可領 */
+  /* 藥吃完日 = startDate + n × days */
+  var endDay=addDays(start, n*days);
+  return{earliest:addDays(endDay,-early), latest:addDays(endDay,3)};
+}
 function colorBg(c){return{teal:'var(--teal-light)',amber:'var(--amber-light)',red:'var(--red-light)',green:'var(--green-light)',purple:'var(--purple-light)'}[c]||'var(--bg)';}
 function compressImg(file,maxPx,q,cb){
   var url=URL.createObjectURL(file);
@@ -1053,10 +1063,79 @@ function renderTodayPickup(){
     '<div style="height:4px"></div>';
 }
 
+function saveTodayDone(){
+  try{ localStorage.setItem('mm_today_done_'+todayStr(), JSON.stringify(todayDone)); }catch(e){}
+}
+function loadTodayDone(){
+  try{
+    var saved = JSON.parse(localStorage.getItem('mm_today_done_'+todayStr())||'[]');
+    return Array.isArray(saved) ? saved : [];
+  }catch(e){ return []; }
+}
+
+// 扣減/恢復庫存
+function deductStock(medId, qty){
+  try {
+    var appts = getData();
+    var changed = false;
+    for(var ai=0; ai<appts.length; ai++){
+      var rxList = appts[ai].rxList || [];
+      for(var ri=0; ri<rxList.length; ri++){
+        var meds = rxList[ri].meds || [];
+        for(var mi=0; mi<meds.length; mi++){
+          if(meds[mi].id === medId){
+            meds[mi].stockQty = Math.max(0, (meds[mi].stockQty||0) - qty);
+            changed = true;
+          }
+        }
+      }
+    }
+    if(changed) saveData(appts);
+  } catch(e){ console.log('[Stock]', e); }
+}
+
+// 同步藥品資料到 Cloudflare Worker KV
+function syncMedicineToWorker(){
+  try {
+    var u = currentUser();
+    if(!u) return;
+    var appts = getData();
+    var meds = [];
+    for(var ai=0; ai<appts.length; ai++){
+      var rxList = appts[ai].rxList || [];
+      for(var ri=0; ri<rxList.length; ri++){
+        var medArr = rxList[ri].meds || [];
+        for(var mi=0; mi<medArr.length; mi++){
+          var m = medArr[mi];
+          if(!m.deletedAt) meds.push({
+            id: m.id || ('m_'+ai+'_'+ri+'_'+mi),
+            name: m.name, freq: m.freq||'QD',
+            timing: m.timing||'飯後',
+            stockQty: m.stockQty||0,
+            dailyDose: m.dailyDose||1,
+          });
+        }
+      }
+    }
+    fetch(WORKER+'/sync-medicine',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        userId: String(currentUserId),
+        lineToken: u.lineToken||null,
+        lineId: u.lineId||null,
+        email: u.email||null,
+        meds: meds,
+        todayDone: loadTodayDone(),
+        today: todayStr()
+      })
+    }).catch(function(e){ console.log('[MedSync]', e); });
+  } catch(e){ console.log('[MedSync]', e); }
+}
+
 function renderTodayMeds(){
   var container=document.getElementById('todayMedSections');
   container.innerHTML='';
-  todayDone=[];
+  todayDone = loadTodayDone(); // 從 localStorage 恢復
 
   /* 統一從 getData() 的 rxList.meds 讀取，避免重複 */
   var meds=[];
@@ -1187,14 +1266,18 @@ function renderTodayMeds(){
             card2.classList.remove('pending','warn');card2.classList.add('done');
             btn2.classList.add('checked');btn2.textContent='✓';btn2.classList.remove('warn-btn');
             showToast('✓ 已記錄服藥');
+            deductStock(mId, 1); // 扣減庫存
           } else {
             todayDone.splice(idx,1);
             card2.classList.remove('done');card2.classList.add(mIsWarn?'warn':'pending');
             btn2.classList.remove('checked');btn2.textContent='○';
             if(mIsWarn)btn2.classList.add('warn-btn');
             showToast('↩ 已取消服藥記錄');
+            deductStock(mId, -1); // 恢復庫存
           }
+          saveTodayDone(); // 持久化服藥狀態
           updateProgress();
+          setTimeout(syncMedicineToWorker, 500); // 同步到 Worker
         }
         cardDiv.onclick=doToggle;
         cardDiv.querySelector('.check-btn').onclick=function(e){e.stopPropagation();doToggle();};
@@ -1693,7 +1776,17 @@ function updatePreview(){
   var early=parseInt(document.getElementById('f-early').value)||10;
   if(!start){document.getElementById('pickupPreview').style.display='none';return;}
   var lines='';
-  for(var i=0;i<total;i++){var base=addDays(start,i*days);lines+='第'+(i+1)+'次：'+fmtFull(addDays(base,-early))+' ~ '+fmtFull(addDays(base,3))+'<br>';}
+  for(var i=0;i<total;i++){
+    var previewStart,previewEnd;
+    if(i===0){
+      /* 第1次：就診當天 */
+      previewStart=start;previewEnd=addDays(start,3);
+    } else {
+      var endDay2=addDays(start,i*days);
+      previewStart=addDays(endDay2,-early);previewEnd=addDays(endDay2,3);
+    }
+    lines+='第'+(i+1)+'次：'+fmtFull(previewStart)+' ~ '+fmtFull(previewEnd)+'<br>';
+  }
   document.getElementById('previewBody').innerHTML=lines;document.getElementById('pickupPreview').style.display='block';
 }
 function addMedForm(pre){
@@ -1902,23 +1995,67 @@ function nSendEmail(subject,message,isUrgent){
   return p;
 }
 function nCheck(){
-  var t=nToday(),hour=new Date().getHours(),msgs=[];
-  var rxList=[
-    {id:'rx1',startDate:'2026-04-10',totalPickups:3,currentPickup:0,daysPerPickup:28,earlyDays:10,clinic:'台大醫院內科'},
-    {id:'rx2',startDate:'2026-03-15',totalPickups:2,currentPickup:1,daysPerPickup:28,earlyDays:10,clinic:'市立聯合醫院'}
-  ];
-  for(var ri=0;ri<rxList.length;ri++){
-    var rx=rxList[ri];if(rx.currentPickup>=rx.totalPickups)continue;
-    var n=rx.currentPickup+1,base=nAddDays(rx.startDate,rx.currentPickup*(rx.daysPerPickup||28));
-    var earl=nAddDays(base,-(rx.earlyDays||10)),late=nAddDays(base,3),key='pickup_'+rx.id+'_'+n;
-    if(nSent(key))continue;
-    var df=Math.round((new Date(earl)-new Date(t))/86400000);
-    if(t>=earl&&t<=late)msgs.push({key:key,priority:1,urgent:true,subject:'🏥 可以去領藥了',body:'🏥【領藥提醒】\n'+rx.clinic+' · 第'+n+'次\n📅 今天可以去領藥！\n⏰ 請於 '+late+' 前領藥'});
-    else if(df>0&&df<=3)msgs.push({key:key,priority:2,urgent:false,subject:'🔔 '+df+'天後可領藥',body:'🔔【領藥即將開放】\n'+rx.clinic+' · 第'+n+'次\n📅 '+df+'天後（'+earl+'）起可領藥'});
+  var t=nToday(), hour=new Date().getHours(), msgs=[];
+  var appts = getData();
+
+  // ① 領藥提醒（真實門診資料）
+  for(var ai=0; ai<appts.length; ai++){
+    var appt = appts[ai];
+    var rxList = appt.rxList || [];
+    for(var ri=0; ri<rxList.length; ri++){
+      var rx = rxList[ri];
+      if(rx.currentPickup >= rx.totalPickups) continue;
+      var n = rx.currentPickup + 1;
+      var win = pickupWin(rx, rx.currentPickup);
+      var key = 'pickup_'+rx.id+'_'+n;
+      if(nSent(key)) continue;
+      var df = Math.round((new Date(win.earliest)-new Date(t))/86400000);
+      if(t >= win.earliest && t <= win.latest){
+        msgs.push({key:key, priority:1, urgent:true,
+          subject:'🏥 可以去領藥了',
+          body:'🏥【領藥提醒】\n'+appt.clinic+' · 第'+n+'次\n📅 今天可以去領藥！\n⏰ 請於 '+win.latest+' 前領藥'});
+      } else if(df > 0 && df <= 3){
+        msgs.push({key:key, priority:2, urgent:false,
+          subject:'🔔 '+df+'天後可領藥',
+          body:'🔔【領藥即將開放】\n'+appt.clinic+' · 第'+n+'次\n📅 '+df+'天後（'+win.earliest+'）起可領藥'});
+      }
+    }
   }
-  var medList=[{id:'m1',name:'降血壓藥 Amlodipine',stockQty:21,dailyDose:1},{id:'m2',name:'血糖藥 Metformin',stockQty:17,dailyDose:2},{id:'m3',name:'胃藥 Omeprazole',stockQty:3,dailyDose:2},{id:'m4',name:'腸胃藥 Mosapride',stockQty:14,dailyDose:3},{id:'m5',name:'整腸藥 Lactulose',stockQty:20,dailyDose:1}];
-  for(var mi=0;mi<medList.length;mi++){var m=medList[mi];var dl=Math.floor(m.stockQty/m.dailyDose);var key2='stock_'+m.id;if(nSent(key2))continue;if(dl<5)msgs.push({key:key2,priority:1,urgent:true,subject:'🔴 庫存緊急：'+m.name,body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});else if(dl<10)msgs.push({key:key2,priority:2,urgent:false,subject:'🟡 庫存偏低：'+m.name,body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});}
-  if(hour>=8){var dk='daily_'+t;if(!nSent(dk)){var pending=todayTotal-todayDone.length;if(pending>0)msgs.push({key:dk,priority:3,urgent:false,subject:'⏰ 今日尚有 '+pending+' 種藥品未服用',body:'⏰【每日服藥提醒】\n今天尚有 '+pending+' 種藥品未記錄服用。\n請記得按時服藥！'});}}
+
+  // ② 庫存警告（真實藥品資料）
+  var allMeds = [];
+  for(var ai2=0; ai2<appts.length; ai2++){
+    var rxList2 = appts[ai2].rxList || [];
+    for(var ri2=0; ri2<rxList2.length; ri2++){
+      var meds2 = rxList2[ri2].meds || [];
+      for(var mi2=0; mi2<meds2.length; mi2++){
+        if(!meds2[mi2].deletedAt) allMeds.push(meds2[mi2]);
+      }
+    }
+  }
+  for(var mi=0; mi<allMeds.length; mi++){
+    var m = allMeds[mi];
+    var dl = Math.floor((m.stockQty||0)/(m.dailyDose||1));
+    var key2 = 'stock_'+m.id+'_'+t;
+    if(nSent(key2)) continue;
+    if(dl<5) msgs.push({key:key2,priority:1,urgent:true,
+      subject:'🔴 庫存緊急：'+m.name,
+      body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});
+    else if(dl<10) msgs.push({key:key2,priority:2,urgent:false,
+      subject:'🟡 庫存偏低：'+m.name,
+      body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});
+  }
+
+  // ③ 每日服藥提醒
+  if(hour>=8){
+    var dk='daily_'+t;
+    if(!nSent(dk)){
+      var pending=todayTotal-todayDone.length;
+      if(pending>0) msgs.push({key:dk,priority:3,urgent:false,
+        subject:'⏰ 今日尚有 '+pending+' 種藥品未服用',
+        body:'⏰【每日服藥提醒】\n今天尚有 '+pending+' 種藥品未記錄服用。\n請記得按時服藥！'});
+    }
+  }
   if(!msgs.length)return;
   msgs.sort(function(a,b){return a.priority-b.priority;});
   var i=0;
@@ -2076,6 +2213,7 @@ setTimeout(function(){initLiff();},500);
   }
 })();
 setTimeout(nCheck,2000);
+setTimeout(syncMedicineToWorker, 3500); // 同步到 Cloudflare KV，背景 Cron 通知用
 
 /* Modal overlay 背景點擊關閉（iOS 相容版）*/
 (function(){
