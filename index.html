@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
 <title>智慧藥管家</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
@@ -1097,6 +1095,7 @@ function renderTodayMeds(){
   var container=document.getElementById('todayMedSections');
   container.innerHTML='';
   todayDone=[];
+  var _takenToday=loadTodayTaken();
 
   /* 統一從 getData() 的 rxList.meds 讀取，避免重複 */
   var meds=[];
@@ -1180,6 +1179,7 @@ function renderTodayMeds(){
       cardIdx++;
       var item=items[ii];
       var med=item.med;
+      var _alreadyTaken=isTakenToday(med.id);
       var st=stockSt(med);
       var dl=Math.floor(med.stockQty/(med.dailyDose||1));
       var barW=Math.min(100,Math.round(dl/28*100));
@@ -1187,6 +1187,7 @@ function renderTodayMeds(){
       var isWarn=(st==='red');
       var wrapId='mwrap-'+cardIdx;
       var cardId='mcard-'+cardIdx;
+      if(_alreadyTaken) todayDone.push(cardId);
 
       /* 外層 */
       var outerWrap=document.createElement('div');
@@ -1310,6 +1311,24 @@ function renderTodayMeds(){
 }
 
 /* ── 確認對話框（iOS 相容）── */
+
+/* 雙選項確認對話框（iOS 相容）*/
+function showConfirmChoice(msg, btnA, btnB, onA, onB){
+  var ov=document.createElement('div');
+  ov.className='confirm-overlay';
+  ov.innerHTML='<div class="confirm-box">'
+    +'<div class="confirm-icon">💊</div>'
+    +'<div class="confirm-title">新增門診完成</div>'
+    +'<div class="confirm-msg">'+msg+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">'
+    +'<button id="cc-a" style="padding:12px;border-radius:12px;border:none;background:var(--teal);color:#fff;font-size:14px;font-weight:700;cursor:pointer">'+btnA+'</button>'
+    +'<button id="cc-b" style="padding:12px;border-radius:12px;border:1.5px solid var(--border);background:transparent;font-size:14px;font-weight:700;color:var(--ink2);cursor:pointer">'+btnB+'</button>'
+    +'</div></div>';
+  document.body.appendChild(ov);
+  document.getElementById('cc-a').onclick=function(){document.body.removeChild(ov);onA();};
+  document.getElementById('cc-b').onclick=function(){document.body.removeChild(ov);onB();};
+}
+
 function showConfirm(msg,onOk){
   var ov=document.createElement('div');
   ov.className='confirm-overlay';
@@ -1719,8 +1738,23 @@ function stepNext(){
 
     closeAddModal();
     renderCabinet();
-    renderTodayMeds();
-    showToast('✓ 門診「'+clinic+'」已新增，共 '+newMeds.length+' 項藥品');
+    renderTodayPickup();
+
+    /* 詢問是否今天已領藥 */
+    var _savedMeds = newMeds.slice();
+    showConfirmChoice(
+      '今天是否已在「'+clinic+'」領藥並拿到藥品？',
+      '✅ 已領藥，加入今日服藥',
+      '⏰ 尚未領藥',
+      function(){
+        renderTodayMeds();
+        showToast('✓ 門診已新增，今日用藥已加入');
+      },
+      function(){
+        renderTodayMeds();
+        showToast('✓ 門診「'+clinic+'」已新增，共 '+_savedMeds.length+' 項藥品');
+      }
+    );
     return;
   }
   updateStep();
