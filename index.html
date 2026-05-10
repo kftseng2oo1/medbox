@@ -1064,6 +1064,39 @@ function renderTodayPickup(){
 }
 
 
+
+/* 服藥後扣除庫存（dailyDose 顆）*/
+function deductStock(medId){
+  var allD=getData();
+  var changed=false;
+  for(var ai=0;ai<allD.length;ai++){
+    for(var ri=0;ri<allD[ai].rxList.length;ri++){
+      var meds=allD[ai].rxList[ri].meds;
+      for(var mi=0;mi<meds.length;mi++){
+        if(meds[mi].id===medId){
+          var dose=meds[mi].dailyDose||1;
+          meds[mi].stockQty=Math.max(0,meds[mi].stockQty-dose);
+          changed=true;
+        }
+      }
+    }
+  }
+  if(changed){
+    saveData(allD);
+    /* 同步更新 DATA[] */
+    for(var di=0;di<DATA.length;di++){
+      for(var dri=0;dri<DATA[di].rxList.length;dri++){
+        for(var dmi=0;dmi<DATA[di].rxList[dri].meds.length;dmi++){
+          if(DATA[di].rxList[dri].meds[dmi].id===medId){
+            var d2=DATA[di].rxList[dri].meds[dmi].dailyDose||1;
+            DATA[di].rxList[dri].meds[dmi].stockQty=Math.max(0,DATA[di].rxList[dri].meds[dmi].stockQty-d2);
+          }
+        }
+      }
+    }
+  }
+}
+
 /* ════ 服藥記錄（每天限一次，跨天自動重置）════ */
 function getMedRecordKey(){
   return 'mm_taken_'+currentUserId+'_'+todayStr();
@@ -1220,21 +1253,22 @@ function renderTodayMeds(){
         function doToggle(){
           var wrap2=document.getElementById(wId);
           if(wrap2&&wrap2.classList.contains('swiped')){wrap2.classList.remove('swiped');return;}
+          /* 已服用：不可取消 */
+          if(isTakenToday(mMedId)){
+            showToast('✅ 今日已記錄服用，明天自動重置');
+            return;
+          }
           var card2=document.getElementById(cId);
           var btn2=document.getElementById('cbtn-'+btnIdx);
-          var idx=todayDone.indexOf(cId);
-          if(idx===-1){
-            todayDone.push(cId);
-            card2.classList.remove('pending','warn');card2.classList.add('done');
-            btn2.classList.add('checked');btn2.textContent='✓';btn2.classList.remove('warn-btn');
-            showToast('✓ 已記錄服藥');
-          } else {
-            todayDone.splice(idx,1);
-            card2.classList.remove('done');card2.classList.add(mIsWarn?'warn':'pending');
-            btn2.classList.remove('checked');btn2.textContent='○';
-            if(mIsWarn)btn2.classList.add('warn-btn');
-            showToast('↩ 已取消服藥記錄');
-          }
+          /* 記錄服藥 + 鎖定 + 扣庫存 */
+          todayDone.push(cId);
+          markTakenToday(mMedId);
+          card2.classList.remove('pending','warn');card2.classList.add('done');
+          btn2.classList.add('checked');btn2.textContent='✓';btn2.classList.remove('warn-btn');
+          btn2.title='今日已服用';
+          /* 扣除庫存（在 localStorage 的門診資料裡更新）*/
+          deductStock(mMedId);
+          showToast('✅ 已記錄服藥，庫存已更新');
           updateProgress();
         }
         cardDiv.onclick=doToggle;
