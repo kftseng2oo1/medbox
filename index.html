@@ -1063,79 +1063,38 @@ function renderTodayPickup(){
     '<div style="height:4px"></div>';
 }
 
-function saveTodayDone(){
-  try{ localStorage.setItem('mm_today_done_'+todayStr(), JSON.stringify(todayDone)); }catch(e){}
+
+/* ════ 服藥記錄（每天限一次，跨天自動重置）════ */
+function getMedRecordKey(){
+  return 'mm_taken_'+currentUserId+'_'+todayStr();
 }
-function loadTodayDone(){
+function loadTodayTaken(){
+  try{var raw=localStorage.getItem(getMedRecordKey());if(raw)return JSON.parse(raw);}catch(e){}
+  return {};
+}
+function saveTodayTaken(takenMap){
+  try{localStorage.setItem(getMedRecordKey(),JSON.stringify(takenMap));}catch(e){}
+}
+function isTakenToday(medId){return loadTodayTaken()[medId]===true;}
+function markTakenToday(medId){var t=loadTodayTaken();t[medId]=true;saveTodayTaken(t);}
+function cleanOldMedRecords(){
   try{
-    var saved = JSON.parse(localStorage.getItem('mm_today_done_'+todayStr())||'[]');
-    return Array.isArray(saved) ? saved : [];
-  }catch(e){ return []; }
-}
-
-// 扣減/恢復庫存
-function deductStock(medId, qty){
-  try {
-    var appts = getData();
-    var changed = false;
-    for(var ai=0; ai<appts.length; ai++){
-      var rxList = appts[ai].rxList || [];
-      for(var ri=0; ri<rxList.length; ri++){
-        var meds = rxList[ri].meds || [];
-        for(var mi=0; mi<meds.length; mi++){
-          if(meds[mi].id === medId){
-            meds[mi].stockQty = Math.max(0, (meds[mi].stockQty||0) - qty);
-            changed = true;
-          }
-        }
+    var keys=[];for(var i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
+    var cutoff=addDays(todayStr(),-7);
+    for(var ki=0;ki<keys.length;ki++){
+      var k=keys[ki];
+      if(k&&k.indexOf('mm_taken_')===0){
+        var pts=k.split('_');var ds=pts[pts.length-1];
+        if(ds&&ds<cutoff)localStorage.removeItem(k);
       }
     }
-    if(changed) saveData(appts);
-  } catch(e){ console.log('[Stock]', e); }
-}
-
-// 同步藥品資料到 Cloudflare Worker KV
-function syncMedicineToWorker(){
-  try {
-    var u = currentUser();
-    if(!u) return;
-    var appts = getData();
-    var meds = [];
-    for(var ai=0; ai<appts.length; ai++){
-      var rxList = appts[ai].rxList || [];
-      for(var ri=0; ri<rxList.length; ri++){
-        var medArr = rxList[ri].meds || [];
-        for(var mi=0; mi<medArr.length; mi++){
-          var m = medArr[mi];
-          if(!m.deletedAt) meds.push({
-            id: m.id || ('m_'+ai+'_'+ri+'_'+mi),
-            name: m.name, freq: m.freq||'QD',
-            timing: m.timing||'飯後',
-            stockQty: m.stockQty||0,
-            dailyDose: m.dailyDose||1,
-          });
-        }
-      }
-    }
-    fetch(WORKER+'/sync-medicine',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        userId: String(currentUserId),
-        lineToken: u.lineToken||null,
-        lineId: u.lineId||null,
-        email: u.email||null,
-        meds: meds,
-        todayDone: loadTodayDone(),
-        today: todayStr()
-      })
-    }).catch(function(e){ console.log('[MedSync]', e); });
-  } catch(e){ console.log('[MedSync]', e); }
+  }catch(e){}
 }
 
 function renderTodayMeds(){
   var container=document.getElementById('todayMedSections');
   container.innerHTML='';
-  todayDone = loadTodayDone(); // 從 localStorage 恢復
+  todayDone=[];
 
   /* 統一從 getData() 的 rxList.meds 讀取，避免重複 */
   var meds=[];
@@ -1250,10 +1209,10 @@ function renderTodayMeds(){
         +'<div class="med-meta"><span class="chip">'+med.dose+'</span><span class="chip">'+item.timing+'</span>'+chipExtra+'</div>'
         +'<div class="sbar-row"><div class="sbar-bg"><div class="sbar-fill" style="width:'+barW+'%;background:'+barC+'"></div></div>'+barLbl+'</div>'
         +'</div>'
-        +'<button class="check-btn'+(isWarn?' warn-btn':'')+'" id="cbtn-'+cardIdx+'">○</button>';
+        +'<button class="check-btn'+( isWarn?' warn-btn':'')+(_alreadyTaken?' checked':'')+'" id="cbtn-'+cardIdx+'">'+(_alreadyTaken?'✓':'○')+'</button>';
 
       /* 閉包綁定事件 */
-      (function(wId,cId,btnIdx,mName,mId,mIsWarn){
+      (function(wId,cId,btnIdx,mName,mId,mIsWarn,mMedId){
         /* 點擊服藥 */
         function doToggle(){
           var wrap2=document.getElementById(wId);
@@ -1266,18 +1225,14 @@ function renderTodayMeds(){
             card2.classList.remove('pending','warn');card2.classList.add('done');
             btn2.classList.add('checked');btn2.textContent='✓';btn2.classList.remove('warn-btn');
             showToast('✓ 已記錄服藥');
-            deductStock(mId, 1); // 扣減庫存
           } else {
             todayDone.splice(idx,1);
             card2.classList.remove('done');card2.classList.add(mIsWarn?'warn':'pending');
             btn2.classList.remove('checked');btn2.textContent='○';
             if(mIsWarn)btn2.classList.add('warn-btn');
             showToast('↩ 已取消服藥記錄');
-            deductStock(mId, -1); // 恢復庫存
           }
-          saveTodayDone(); // 持久化服藥狀態
           updateProgress();
-          setTimeout(syncMedicineToWorker, 500); // 同步到 Worker
         }
         cardDiv.onclick=doToggle;
         cardDiv.querySelector('.check-btn').onclick=function(e){e.stopPropagation();doToggle();};
@@ -1334,7 +1289,7 @@ function renderTodayMeds(){
           }
         },false);
 
-      })(wrapId,cardId,cardIdx,med.name,med.id,isWarn);
+      })(wrapId,cardId,cardIdx,med.name,med.id,isWarn,med.id);
 
       outerWrap.appendChild(cardDiv);
       outerWrap.appendChild(delBtn);
@@ -1995,67 +1950,23 @@ function nSendEmail(subject,message,isUrgent){
   return p;
 }
 function nCheck(){
-  var t=nToday(), hour=new Date().getHours(), msgs=[];
-  var appts = getData();
-
-  // ① 領藥提醒（真實門診資料）
-  for(var ai=0; ai<appts.length; ai++){
-    var appt = appts[ai];
-    var rxList = appt.rxList || [];
-    for(var ri=0; ri<rxList.length; ri++){
-      var rx = rxList[ri];
-      if(rx.currentPickup >= rx.totalPickups) continue;
-      var n = rx.currentPickup + 1;
-      var win = pickupWin(rx, rx.currentPickup);
-      var key = 'pickup_'+rx.id+'_'+n;
-      if(nSent(key)) continue;
-      var df = Math.round((new Date(win.earliest)-new Date(t))/86400000);
-      if(t >= win.earliest && t <= win.latest){
-        msgs.push({key:key, priority:1, urgent:true,
-          subject:'🏥 可以去領藥了',
-          body:'🏥【領藥提醒】\n'+appt.clinic+' · 第'+n+'次\n📅 今天可以去領藥！\n⏰ 請於 '+win.latest+' 前領藥'});
-      } else if(df > 0 && df <= 3){
-        msgs.push({key:key, priority:2, urgent:false,
-          subject:'🔔 '+df+'天後可領藥',
-          body:'🔔【領藥即將開放】\n'+appt.clinic+' · 第'+n+'次\n📅 '+df+'天後（'+win.earliest+'）起可領藥'});
-      }
-    }
+  var t=nToday(),hour=new Date().getHours(),msgs=[];
+  var rxList=[
+    {id:'rx1',startDate:'2026-04-10',totalPickups:3,currentPickup:0,daysPerPickup:28,earlyDays:10,clinic:'台大醫院內科'},
+    {id:'rx2',startDate:'2026-03-15',totalPickups:2,currentPickup:1,daysPerPickup:28,earlyDays:10,clinic:'市立聯合醫院'}
+  ];
+  for(var ri=0;ri<rxList.length;ri++){
+    var rx=rxList[ri];if(rx.currentPickup>=rx.totalPickups)continue;
+    var n=rx.currentPickup+1,base=nAddDays(rx.startDate,rx.currentPickup*(rx.daysPerPickup||28));
+    var earl=nAddDays(base,-(rx.earlyDays||10)),late=nAddDays(base,3),key='pickup_'+rx.id+'_'+n;
+    if(nSent(key))continue;
+    var df=Math.round((new Date(earl)-new Date(t))/86400000);
+    if(t>=earl&&t<=late)msgs.push({key:key,priority:1,urgent:true,subject:'🏥 可以去領藥了',body:'🏥【領藥提醒】\n'+rx.clinic+' · 第'+n+'次\n📅 今天可以去領藥！\n⏰ 請於 '+late+' 前領藥'});
+    else if(df>0&&df<=3)msgs.push({key:key,priority:2,urgent:false,subject:'🔔 '+df+'天後可領藥',body:'🔔【領藥即將開放】\n'+rx.clinic+' · 第'+n+'次\n📅 '+df+'天後（'+earl+'）起可領藥'});
   }
-
-  // ② 庫存警告（真實藥品資料）
-  var allMeds = [];
-  for(var ai2=0; ai2<appts.length; ai2++){
-    var rxList2 = appts[ai2].rxList || [];
-    for(var ri2=0; ri2<rxList2.length; ri2++){
-      var meds2 = rxList2[ri2].meds || [];
-      for(var mi2=0; mi2<meds2.length; mi2++){
-        if(!meds2[mi2].deletedAt) allMeds.push(meds2[mi2]);
-      }
-    }
-  }
-  for(var mi=0; mi<allMeds.length; mi++){
-    var m = allMeds[mi];
-    var dl = Math.floor((m.stockQty||0)/(m.dailyDose||1));
-    var key2 = 'stock_'+m.id+'_'+t;
-    if(nSent(key2)) continue;
-    if(dl<5) msgs.push({key:key2,priority:1,urgent:true,
-      subject:'🔴 庫存緊急：'+m.name,
-      body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});
-    else if(dl<10) msgs.push({key:key2,priority:2,urgent:false,
-      subject:'🟡 庫存偏低：'+m.name,
-      body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});
-  }
-
-  // ③ 每日服藥提醒
-  if(hour>=8){
-    var dk='daily_'+t;
-    if(!nSent(dk)){
-      var pending=todayTotal-todayDone.length;
-      if(pending>0) msgs.push({key:dk,priority:3,urgent:false,
-        subject:'⏰ 今日尚有 '+pending+' 種藥品未服用',
-        body:'⏰【每日服藥提醒】\n今天尚有 '+pending+' 種藥品未記錄服用。\n請記得按時服藥！'});
-    }
-  }
+  var medList=[{id:'m1',name:'降血壓藥 Amlodipine',stockQty:21,dailyDose:1},{id:'m2',name:'血糖藥 Metformin',stockQty:17,dailyDose:2},{id:'m3',name:'胃藥 Omeprazole',stockQty:3,dailyDose:2},{id:'m4',name:'腸胃藥 Mosapride',stockQty:14,dailyDose:3},{id:'m5',name:'整腸藥 Lactulose',stockQty:20,dailyDose:1}];
+  for(var mi=0;mi<medList.length;mi++){var m=medList[mi];var dl=Math.floor(m.stockQty/m.dailyDose);var key2='stock_'+m.id;if(nSent(key2))continue;if(dl<5)msgs.push({key:key2,priority:1,urgent:true,subject:'🔴 庫存緊急：'+m.name,body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});else if(dl<10)msgs.push({key:key2,priority:2,urgent:false,subject:'🟡 庫存偏低：'+m.name,body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});}
+  if(hour>=8){var dk='daily_'+t;if(!nSent(dk)){var pending=todayTotal-todayDone.length;if(pending>0)msgs.push({key:dk,priority:3,urgent:false,subject:'⏰ 今日尚有 '+pending+' 種藥品未服用',body:'⏰【每日服藥提醒】\n今天尚有 '+pending+' 種藥品未記錄服用。\n請記得按時服藥！'});}}
   if(!msgs.length)return;
   msgs.sort(function(a,b){return a.priority-b.priority;});
   var i=0;
@@ -2193,6 +2104,7 @@ function saveAddMed(){
 }
 
 /* ── 初始化 ── */
+cleanOldMedRecords();
 renderTodayMeds();
 renderTodayPickup();
 renderCabinet();
@@ -2213,7 +2125,6 @@ setTimeout(function(){initLiff();},500);
   }
 })();
 setTimeout(nCheck,2000);
-setTimeout(syncMedicineToWorker, 3500); // 同步到 Cloudflare KV，背景 Cron 通知用
 
 /* Modal overlay 背景點擊關閉（iOS 相容版）*/
 (function(){
@@ -2870,6 +2781,7 @@ function deleteCurrentUser(){
 /* ════ 多用戶管理系統結束 ════ */
 
 window.renderTodayPickup=renderTodayPickup;
+window.cleanOldMedRecords=cleanOldMedRecords;
 window.aiSend=aiSend;
 window.initLiff=initLiff;
 window.doLiffLogin=doLiffLogin;
