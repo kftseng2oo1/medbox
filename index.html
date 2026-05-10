@@ -2021,35 +2021,82 @@ function nSendEmail(subject,message,isUrgent){
 }
 function nCheck(){
   var t=nToday(),hour=new Date().getHours(),msgs=[];
-  var rxList=[
-    {id:'rx1',startDate:'2026-04-10',totalPickups:3,currentPickup:0,daysPerPickup:28,earlyDays:10,clinic:'台大醫院內科'},
-    {id:'rx2',startDate:'2026-03-15',totalPickups:2,currentPickup:1,daysPerPickup:28,earlyDays:10,clinic:'市立聯合醫院'}
-  ];
-  for(var ri=0;ri<rxList.length;ri++){
-    var rx=rxList[ri];if(rx.currentPickup>=rx.totalPickups)continue;
-    var n=rx.currentPickup+1,base=nAddDays(rx.startDate,rx.currentPickup*(rx.daysPerPickup||28));
-    var earl=nAddDays(base,-(rx.earlyDays||10)),late=nAddDays(base,3),key='pickup_'+rx.id+'_'+n;
-    if(nSent(key))continue;
-    var df=Math.round((new Date(earl)-new Date(t))/86400000);
-    if(t>=earl&&t<=late)msgs.push({key:key,priority:1,urgent:true,subject:'🏥 可以去領藥了',body:'🏥【領藥提醒】\n'+rx.clinic+' · 第'+n+'次\n📅 今天可以去領藥！\n⏰ 請於 '+late+' 前領藥'});
-    else if(df>0&&df<=3)msgs.push({key:key,priority:2,urgent:false,subject:'🔔 '+df+'天後可領藥',body:'🔔【領藥即將開放】\n'+rx.clinic+' · 第'+n+'次\n📅 '+df+'天後（'+earl+'）起可領藥'});
+  var allD=getData();
+
+  /* ── 領藥提醒（從實際門診資料）── */
+  for(var ai=0;ai<allD.length;ai++){
+    var appt=allD[ai];
+    if(appt.isTemp) continue;
+    for(var ri=0;ri<appt.rxList.length;ri++){
+      var rx=appt.rxList[ri];
+      if(rx.currentPickup>=rx.totalPickups) continue;
+      var n=rx.currentPickup;
+      var w=pickupWin(rx,n);
+      var earl=w.earliest,late=w.latest;
+      var key='pickup_'+rx.id+'_'+(n+1);
+      if(nSent(key)) continue;
+      var df=Math.round((new Date(earl)-new Date(t))/86400000);
+      if(t>=earl&&t<=late){
+        msgs.push({key:key,priority:1,urgent:true,
+          subject:'🏥 可以去領藥了',
+          body:'🏥【領藥提醒】\n'+appt.clinic+' · 第'+(n+1)+'次 / 共'+rx.totalPickups+'次\n📅 今天可以去領藥！\n⏰ 請於 '+late+' 前領藥'});
+      } else if(df>0&&df<=3){
+        msgs.push({key:key,priority:2,urgent:false,
+          subject:'🔔 '+df+'天後可領藥',
+          body:'🔔【領藥即將開放】\n'+appt.clinic+' · 第'+(n+1)+'次\n📅 '+df+'天後（'+earl+'）起可領藥'});
+      }
+    }
   }
-  var medList=[{id:'m1',name:'降血壓藥 Amlodipine',stockQty:21,dailyDose:1},{id:'m2',name:'血糖藥 Metformin',stockQty:17,dailyDose:2},{id:'m3',name:'胃藥 Omeprazole',stockQty:3,dailyDose:2},{id:'m4',name:'腸胃藥 Mosapride',stockQty:14,dailyDose:3},{id:'m5',name:'整腸藥 Lactulose',stockQty:20,dailyDose:1}];
-  for(var mi=0;mi<medList.length;mi++){var m=medList[mi];var dl=Math.floor(m.stockQty/m.dailyDose);var key2='stock_'+m.id;if(nSent(key2))continue;if(dl<5)msgs.push({key:key2,priority:1,urgent:true,subject:'🔴 庫存緊急：'+m.name,body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});else if(dl<10)msgs.push({key:key2,priority:2,urgent:false,subject:'🟡 庫存偏低：'+m.name,body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});}
-  if(hour>=8){var dk='daily_'+t;if(!nSent(dk)){var pending=todayTotal-todayDone.length;if(pending>0)msgs.push({key:dk,priority:3,urgent:false,subject:'⏰ 今日尚有 '+pending+' 種藥品未服用',body:'⏰【每日服藥提醒】\n今天尚有 '+pending+' 種藥品未記錄服用。\n請記得按時服藥！'});}}
-  if(!msgs.length)return;
+
+  /* ── 庫存警告（從實際藥品資料）── */
+  for(var ai2=0;ai2<allD.length;ai2++){
+    for(var ri2=0;ri2<allD[ai2].rxList.length;ri2++){
+      var meds=allD[ai2].rxList[ri2].meds||[];
+      for(var mi=0;mi<meds.length;mi++){
+        var m=meds[mi];
+        if(m.deletedAt) continue;
+        var dl=Math.floor(m.stockQty/(m.dailyDose||1));
+        var key2='stock_'+m.id+'_'+t;  /* 每天一次 */
+        if(nSent(key2)) continue;
+        if(dl<5){
+          msgs.push({key:key2,priority:1,urgent:true,
+            subject:'🔴 庫存緊急：'+m.name,
+            body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});
+        } else if(dl<10){
+          msgs.push({key:key2,priority:2,urgent:false,
+            subject:'🟡 庫存偏低：'+m.name,
+            body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});
+        }
+      }
+    }
+  }
+
+  /* ── 每日服藥提醒 ── */
+  if(hour>=8){
+    var dk='daily_'+t;
+    if(!nSent(dk)){
+      var pending=todayTotal-todayDone.length;
+      if(pending>0) msgs.push({key:dk,priority:3,urgent:false,
+        subject:'⏰ 今日尚有 '+pending+' 種藥品未服用',
+        body:'⏰【每日服藥提醒】\n今天尚有 '+pending+' 種藥品未記錄服用。\n請記得按時服藥！'});
+    }
+  }
+
+  if(!msgs.length) return;
   msgs.sort(function(a,b){return a.priority-b.priority;});
   var i=0;
   function next(){
-    if(i>=msgs.length)return;var msg=msgs[i];i++;
+    if(i>=msgs.length) return;
+    var msg=msgs[i];i++;
     nSendEmail(msg.subject,msg.body,msg.urgent)
-      .then(function(resp){if(resp&&(resp.id||resp.ok)){nMark(msg.key);console.log('[Notify] '+msg.subject);}})
+      .then(function(resp){
+        if(resp&&(resp.id||resp.ok)){nMark(msg.key);console.log('[Notify] '+msg.subject);}
+      })
       .catch(function(){})
       .then(function(){setTimeout(next,800);});
   }
   next();
 }
-
 
 /* ── 獨立加藥 Modal（拍照辨識 / 快速加藥）── */
 var _addMedTargetRxId = null;
