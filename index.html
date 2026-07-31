@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
 <title>智慧藥管家</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
@@ -2533,17 +2531,25 @@ function fetchLiffProfile(){
     .then(function(profile){
       _liffProfile = profile;
       console.log('[LIFF] userId:', profile.userId);
-      /* 自動填入 userId */
+      /* 自動填入 userId（強制覆蓋）*/
       var inp = document.getElementById('uf-line-id');
-      if(inp && !inp.value) inp.value = profile.userId;
-      /* 儲存到當前用戶 */
-      var u = loadUserProfile(currentUserId);
-      if(!u.lineId){
-        u.lineId = profile.userId;
-        saveUserProfile(currentUserId, u);
-        profile_obj_update_lineid(profile.userId);
+      if(inp){
+        inp.value = profile.userId;
+        /* 觸發視覺效果讓使用者知道已填入 */
+        inp.style.borderColor = '#06c755';
+        inp.style.background = '#f0fdf4';
+        setTimeout(function(){
+          inp.style.borderColor = '';
+          inp.style.background = '';
+        }, 2000);
       }
+      /* 儲存到當前用戶（不管有無舊值都更新）*/
+      var u = loadUserProfile(currentUserId);
+      u.lineId = profile.userId;
+      saveUserProfile(currentUserId, u);
+      profile_obj_update_lineid(profile.userId);
       updateLiffUI();
+      showToast('✅ LINE userId 已自動填入');
     })
     .catch(function(e){ console.log('[LIFF] getProfile error:', e); });
 }
@@ -2567,7 +2573,7 @@ function updateLiffUI(){
     if(nameEl) nameEl.textContent = _liffProfile.displayName || '';
     if(uidEl) uidEl.textContent = 'userId: ' + _liffProfile.userId;
     var inp = document.getElementById('uf-line-id');
-    if(inp) inp.value = _liffProfile.userId;
+    if(inp && _liffProfile.userId) inp.value = _liffProfile.userId;
   } else {
     loginBtn.style.display = 'flex';
     userCard.style.display = 'none';
