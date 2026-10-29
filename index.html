@@ -2056,7 +2056,8 @@ function nCheck(){
     }
   }
 
-  /* ── 庫存警告（從實際藥品資料）── */
+  /* ── 庫存警告（合併成一則）── */
+  var stockLines=[],stockKeys=[],stockUrgent=false;
   for(var ai2=0;ai2<allD.length;ai2++){
     for(var ri2=0;ri2<allD[ai2].rxList.length;ri2++){
       var meds=allD[ai2].rxList[ri2].meds||[];
@@ -2066,17 +2067,17 @@ function nCheck(){
         var dl=Math.floor(m.stockQty/(m.dailyDose||1));
         var key2='stock_'+m.id+'_'+t;  /* 每天一次 */
         if(nSent(key2)) continue;
-        if(dl<5){
-          msgs.push({key:key2,priority:1,urgent:true,
-            subject:'🔴 庫存緊急：'+m.name,
-            body:'🔴【庫存緊急警告】\n藥品：'+m.name+'\n⚠️ 庫存僅剩 '+dl+' 天！\n請盡快補充。'});
-        } else if(dl<10){
-          msgs.push({key:key2,priority:2,urgent:false,
-            subject:'🟡 庫存偏低：'+m.name,
-            body:'🟡【庫存偏低提醒】\n藥品：'+m.name+'\n📦 庫存剩 '+dl+' 天，請注意補充。'});
-        }
+        if(dl<5){stockUrgent=true;stockLines.push({d:dl,txt:'🔴 '+m.name+'：剩 '+dl+' 天'});stockKeys.push(key2);}
+        else if(dl<10){stockLines.push({d:dl,txt:'🟡 '+m.name+'：剩 '+dl+' 天'});stockKeys.push(key2);}
       }
     }
+  }
+  if(stockLines.length){
+    stockLines.sort(function(a,b){return a.d-b.d;});
+    var sl=[];for(var sj=0;sj<stockLines.length;sj++)sl.push(stockLines[sj].txt);
+    msgs.push({key:stockKeys,priority:stockUrgent?1:2,urgent:stockUrgent,
+      subject:(stockUrgent?'🔴 ':'🟡 ')+'庫存提醒（'+stockLines.length+' 種藥品）',
+      body:(stockUrgent?'🔴【庫存警告】':'🟡【庫存提醒】')+'以下藥品庫存偏低：\n\n'+sl.join('\n')+'\n\n請盡快補充。'});
   }
 
   /* ── 每日服藥提醒 ── */
@@ -2092,18 +2093,21 @@ function nCheck(){
 
   if(!msgs.length) return;
   msgs.sort(function(a,b){return a.priority-b.priority;});
-  var i=0;
-  function next(){
-    if(i>=msgs.length) return;
-    var msg=msgs[i];i++;
-    nSendEmail(msg.subject,msg.body,msg.urgent)
-      .then(function(resp){
-        if(resp&&(resp.id||resp.ok)){nMark(msg.key);console.log('[Notify] '+msg.subject);}
-      })
-      .catch(function(){})
-      .then(function(){setTimeout(next,800);});
+  /* 合併成單一則通知，避免同時間被連續轟炸 */
+  var allKeys=[],bodies=[],anyUrgent=false;
+  for(var q=0;q<msgs.length;q++){
+    var kk=msgs[q].key;
+    if(kk instanceof Array){for(var z=0;z<kk.length;z++)allKeys.push(kk[z]);}else allKeys.push(kk);
+    bodies.push(msgs[q].body);
+    if(msgs[q].urgent)anyUrgent=true;
   }
-  next();
+  var subj=msgs.length===1?msgs[0].subject:((anyUrgent?'🔴 ':'💊 ')+'藥管家提醒（共 '+msgs.length+' 項）');
+  var text=msgs.length===1?msgs[0].body:bodies.join('\n\n━━━━━━━━\n\n');
+  nSendEmail(subj,text,anyUrgent)
+    .then(function(resp){
+      if(resp&&(resp.id||resp.ok)){for(var w2=0;w2<allKeys.length;w2++)nMark(allKeys[w2]);console.log('[Notify] '+subj);}
+    })
+    .catch(function(){});
 }
 
 /* ── 獨立加藥 Modal（拍照辨識 / 快速加藥）── */
