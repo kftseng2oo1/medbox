@@ -928,7 +928,7 @@ function syncToWorker(){
       var body={userId:'u'+currentUserId,today:td,meds:meds,todayDone:done,
         lineId:u.notifyLine?(u.lineId||''):'',email:u.notifyEmail?(u.email||''):''};
       if(!body.lineId&&!body.email)return;
-      fetch(WORKER+'/sync-medicine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(function(){});
+      fetch(WORKER+'/sync-medicine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){if(r&&r.ok){try{localStorage.setItem('mm_sync_ok_'+currentUserId,String(Date.now()));}catch(e3){}}}).catch(function(){});
     }catch(e){}
   },1500);
 }
@@ -2045,6 +2045,8 @@ function nSendEmail(subject,message,isUrgent){
 function nCheck(){
   var t=nToday(),hour=new Date().getHours(),msgs=[];
   var allD=getData();
+  /* 已同步到伺服器（36 小時內）時，庫存與每日服藥提醒交給伺服器發，避免重複 */
+  var _synced=false;try{_synced=(Date.now()-parseInt(localStorage.getItem('mm_sync_ok_'+currentUserId)||'0',10))<36*3600*1000;}catch(e4){}
 
   /* ── 領藥提醒（從實際門診資料）── */
   for(var ai=0;ai<allD.length;ai++){
@@ -2081,7 +2083,7 @@ function nCheck(){
         if(m.deletedAt) continue;
         var dl=Math.floor(m.stockQty/(m.dailyDose||1));
         var key2='stock_'+m.id+'_'+t;  /* 每天一次 */
-        if(nSent(key2)) continue;
+        if(_synced||nSent(key2)) continue;
         if(dl<5){stockUrgent=true;stockLines.push({d:dl,txt:'🔴 '+m.name+'：剩 '+dl+' 天'});stockKeys.push(key2);}
         else if(dl<10){stockLines.push({d:dl,txt:'🟡 '+m.name+'：剩 '+dl+' 天'});stockKeys.push(key2);}
       }
@@ -2096,7 +2098,7 @@ function nCheck(){
   }
 
   /* ── 每日服藥提醒 ── */
-  if(hour>=8){
+  if(hour>=8&&!_synced){
     var dk='daily_'+t;
     if(!nSent(dk)){
       var pending=todayTotal-todayDone.length;
