@@ -915,6 +915,18 @@ function saveData(appts){
 
 /* ── 同步藥品資料到 Worker（供每日排程通知）── */
 var _syncTimer=null;
+/* 每支手機＋每位用戶一組唯一 ID，避免不同裝置的「用戶0」互相覆蓋 */
+function getSyncUid(){
+  var d='';
+  try{
+    d=localStorage.getItem('mm_device_id')||'';
+    if(!d){
+      d='d'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+      localStorage.setItem('mm_device_id',d);
+    }
+  }catch(e){ d='dx'; }
+  return d+'_u'+currentUserId;
+}
 function syncToWorker(){
   if(_syncTimer)clearTimeout(_syncTimer);
   _syncTimer=setTimeout(function(){
@@ -925,7 +937,7 @@ function syncToWorker(){
           for(var m=0;m<ml.length;m++)meds.push({id:ml[m].id,name:ml[m].name,freq:ml[m].freq,timing:ml[m].timing,stockQty:ml[m].stockQty,dailyDose:ml[m].dailyDose});}}
       var taken=loadTodayTaken();var td=todayStr();var done=[];var secs=['早上','中午','晚上'];
       for(var id in taken){if(taken[id]){for(var k=0;k<3;k++)done.push(td+'_'+id+'_'+secs[k]);}}
-      var body={userId:'u'+currentUserId,today:td,meds:meds,todayDone:done,
+      var body={userId:getSyncUid(),today:td,meds:meds,todayDone:done,
         lineId:u.notifyLine?(u.lineId||''):'',email:u.notifyEmail?(u.email||''):''};
       if(!body.lineId&&!body.email)return;
       fetch(WORKER+'/sync-medicine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){if(r&&r.ok){try{localStorage.setItem('mm_sync_ok_'+currentUserId,String(Date.now()));}catch(e3){}}}).catch(function(){});
