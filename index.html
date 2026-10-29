@@ -427,6 +427,10 @@ body{font-family:-apple-system,sans-serif;background:#f0ede8;color:#1c1917;displ
 .avatar-color-btn{width:36px;height:36px;border-radius:50%;cursor:pointer;border:3px solid transparent;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:#fff}
 .avatar-color-btn.sel{border-color:var(--ink)}
 
+.cal-rem-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.cal-rem-lbl{width:62px;font-size:13px;font-weight:700;flex-shrink:0}
+.cal-rem-time{flex:1;min-width:0}
+.cal-rem-btn{padding:10px 14px;border-radius:9px;border:none;background:#e8f0fe;color:#1a56c4;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -686,6 +690,17 @@ body{font-family:-apple-system,sans-serif;background:#f0ede8;color:#1c1917;displ
       </div>
       <div class="form-group"><div class="form-label">🎂 生日</div><input class="form-input" id="uf-birth" type="date"></div>
       <div class="form-group"><div class="form-label">🩸 血型</div><div class="blood-select"><button class="blood-btn" data-blood="A">A</button><button class="blood-btn" data-blood="B">B</button><button class="blood-btn" data-blood="AB">AB</button><button class="blood-btn" data-blood="O">O</button></div></div>
+      <div class="form-group" id="uf-cal-section">
+        <div class="form-label">📅 Google 日曆吃藥提醒</div>
+        <div style="font-size:11.5px;color:var(--ink2);line-height:1.6;margin-bottom:8px">每天固定時間由 Google 日曆通知你，點通知內的連結就能開啟藥管家記錄服藥。</div>
+        <div id="uf-cal-rows">
+          <div class="cal-rem-row" data-sec="早上"><span class="cal-rem-lbl">🌅 早上</span><input type="time" class="form-input cal-rem-time" value="08:00"><button class="cal-rem-btn" type="button">加入</button></div>
+          <div class="cal-rem-row" data-sec="中午"><span class="cal-rem-lbl">☀️ 中午</span><input type="time" class="form-input cal-rem-time" value="12:00"><button class="cal-rem-btn" type="button">加入</button></div>
+          <div class="cal-rem-row" data-sec="晚上"><span class="cal-rem-lbl">🌙 晚上</span><input type="time" class="form-input cal-rem-time" value="18:30"><button class="cal-rem-btn" type="button">加入</button></div>
+          <div class="cal-rem-row" data-sec="睡前"><span class="cal-rem-lbl">😴 睡前</span><input type="time" class="form-input cal-rem-time" value="21:30"><button class="cal-rem-btn" type="button">加入</button></div>
+        </div>
+        <div style="font-size:11px;color:var(--ink3);margin-top:6px">按「加入」會開啟 Google 日曆，確認儲存即可（每天重複）。提醒時間可在日曆事件內再調整。</div>
+      </div>
       <div id="uf-delete-section" style="display:none;margin-top:8px">
         <div style="height:1px;background:var(--border);margin-bottom:14px"></div>
         <button id="uf-clear-data-btn" style="width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--amber);background:transparent;font-size:13px;font-weight:700;color:var(--amber);cursor:pointer;margin-bottom:8px">🗑 清除此用藥者所有用藥資料</button>
@@ -3063,6 +3078,38 @@ if('serviceWorker' in navigator&&location.protocol.indexOf('http')===0){window.a
     box.addEventListener('touchend',function(){d0=0;},false);
   }
   bind();
+})();
+
+(function(){
+  function pad(n){return n<10?'0'+n:''+n;}
+  function bindCal(){
+    var box=document.getElementById('uf-cal-rows');if(!box)return;
+    var saved={};try{saved=JSON.parse(localStorage.getItem('mm_cal_times')||'{}');}catch(e){}
+    var rows=box.querySelectorAll('.cal-rem-row');
+    for(var i=0;i<rows.length;i++){var sec=rows[i].getAttribute('data-sec');if(saved[sec])rows[i].querySelector('.cal-rem-time').value=saved[sec];}
+    box.addEventListener('click',function(e){
+      var t=e.target;if(!t||t.className.indexOf('cal-rem-btn')<0)return;
+      e.stopPropagation();
+      var row=t.parentNode,sec=row.getAttribute('data-sec');
+      var tm=row.querySelector('.cal-rem-time').value||'08:00';
+      var hh=parseInt(tm.split(':')[0],10),mm=parseInt(tm.split(':')[1],10);
+      var d=new Date();var ymd=''+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate());
+      var st=ymd+'T'+pad(hh)+pad(mm)+'00';
+      var em=hh*60+mm+15;var eh=Math.floor(em/60)%24,emin=em%60;
+      var en=ymd+'T'+pad(eh)+pad(emin)+'00';
+      var u=currentUser();var who=(u&&u.name)?u.name+' ':'';
+      var link=location.origin+location.pathname;
+      var url='https://calendar.google.com/calendar/render?action=TEMPLATE'
+        +'&text='+encodeURIComponent('💊 '+who+sec+'吃藥並記錄')
+        +'&dates='+st+'/'+en+'&ctz=Asia%2FTaipei'
+        +'&recur='+encodeURIComponent('RRULE:FREQ=DAILY')
+        +'&details='+encodeURIComponent('該吃藥了！吃完請到藥管家按「已服用」記錄：\n'+link);
+      saved[sec]=tm;try{localStorage.setItem('mm_cal_times',JSON.stringify(saved));}catch(e2){}
+      var a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+    });
+  }
+  bindCal();
 })();
 </script>
 
