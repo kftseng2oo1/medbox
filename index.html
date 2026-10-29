@@ -6,6 +6,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>智慧藥管家</title>
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-title" content="智慧藥管家">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -889,6 +894,27 @@ function getData(){
 }
 function saveData(appts){
   try{var key=getUserKey?getUserKey():'mm_appointments';localStorage.setItem(key,JSON.stringify(appts));}catch(e){}
+  try{syncToWorker();}catch(e2){}
+}
+
+/* ── 同步藥品資料到 Worker（供每日排程通知）── */
+var _syncTimer=null;
+function syncToWorker(){
+  if(_syncTimer)clearTimeout(_syncTimer);
+  _syncTimer=setTimeout(function(){
+    try{
+      var u=currentUser();var appts=getData();var meds=[];
+      for(var a=0;a<appts.length;a++){var rl=appts[a].rxList||[];
+        for(var r=0;r<rl.length;r++){var ml=rl[r].meds||[];
+          for(var m=0;m<ml.length;m++)meds.push({id:ml[m].id,name:ml[m].name,freq:ml[m].freq,timing:ml[m].timing,stockQty:ml[m].stockQty,dailyDose:ml[m].dailyDose});}}
+      var taken=loadTodayTaken();var td=todayStr();var done=[];var secs=['早上','中午','晚上'];
+      for(var id in taken){if(taken[id]){for(var k=0;k<3;k++)done.push(td+'_'+id+'_'+secs[k]);}}
+      var body={userId:'u'+currentUserId,today:td,meds:meds,todayDone:done,
+        lineId:u.notifyLine?(u.lineId||''):'',email:u.notifyEmail?(u.email||''):''};
+      if(!body.lineId&&!body.email)return;
+      fetch(WORKER+'/sync-medicine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(function(){});
+    }catch(e){}
+  },1500);
 }
 var currentFilter = 'all';
 var todayDone = [];   /* ['wrap-card-1', ...] */
@@ -959,6 +985,7 @@ function compressImg(file,maxPx,q,cb){
 
 /* ── Toast ── */
 var _tt;
+function esc(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function showToast(msg){
   var el=document.getElementById('toast');
   el.textContent=msg;el.classList.add('show');
@@ -1019,7 +1046,7 @@ function renderTodayPickup(){
   for(var vi2=0;vi2<visits.length;vi2++){
     var v=visits[vi2];
     var vLbl=v.df>0?'（'+v.df+'天後）':v.df===0?'（今日回診！）':'（昨日，請確認）';
-    visitCard+='<div class="visit-row"><span>🏥</span><span><strong>回診</strong>：'+v.clinic+' &nbsp;<strong>'+fmtMD(v.date)+'</strong>&nbsp;'+vLbl+'</span></div>';
+    visitCard+='<div class="visit-row"><span>🏥</span><span><strong>回診</strong>：'+esc(v.clinic)+' &nbsp;<strong>'+fmtMD(v.date)+'</strong>&nbsp;'+vLbl+'</span></div>';
   }
 
   /* 領藥卡 */
@@ -1040,7 +1067,7 @@ function renderTodayPickup(){
         cls='future';icon='🔒';title='第'+n+'次領藥';dateMain=fmtMD(w.earliest);dateSub='可領至 '+fmtMD(w.latest);
       } else continue;
       pickupCards+='<div class="pickup-card '+cls+'"><div class="pc-icon">'+icon+'</div>'+
-        '<div class="pc-body"><div class="pc-title">'+title+'</div><div class="pc-sub">'+appt.clinic+' · 第'+n+'次 / 共'+rx.totalPickups+'次</div></div>'+
+        '<div class="pc-body"><div class="pc-title">'+title+'</div><div class="pc-sub">'+esc(appt.clinic)+' · 第'+n+'次 / 共'+rx.totalPickups+'次</div></div>'+
         '<div class="pc-date"><div class="pc-date-main">'+dateMain+'</div><div class="pc-date-sub">'+dateSub+'</div></div></div>';
     }
     /* 庫存警告計數 */
@@ -1109,7 +1136,7 @@ function saveTodayTaken(takenMap){
   try{localStorage.setItem(getMedRecordKey(),JSON.stringify(takenMap));}catch(e){}
 }
 function isTakenToday(medId){return loadTodayTaken()[medId]===true;}
-function markTakenToday(medId){var t=loadTodayTaken();t[medId]=true;saveTodayTaken(t);}
+function markTakenToday(medId){var t=loadTodayTaken();t[medId]=true;saveTodayTaken(t);try{syncToWorker();}catch(e){}}
 function cleanOldMedRecords(){
   try{
     var keys=[];for(var i=0;i<localStorage.length;i++)keys.push(localStorage.key(i));
@@ -1241,8 +1268,8 @@ function renderTodayMeds(){
       var barLbl=isWarn?'<span class="sbar-lbl danger">需補貨！</span>':'<span class="sbar-lbl">庫存'+dl+'天</span>';
       cardDiv.innerHTML='<div class="med-icon" style="background:'+colorBg(med.color||'teal')+'">💊</div>'
         +'<div class="med-body">'
-        +'<div class="med-name">'+med.name+'</div>'
-        +'<div class="med-meta"><span class="chip">'+med.dose+'</span><span class="chip">'+item.timing+'</span>'+chipExtra+'</div>'
+        +'<div class="med-name">'+esc(med.name)+'</div>'
+        +'<div class="med-meta"><span class="chip">'+esc(med.dose)+'</span><span class="chip">'+esc(item.timing)+'</span>'+chipExtra+'</div>'
         +'<div class="sbar-row"><div class="sbar-bg"><div class="sbar-fill" style="width:'+barW+'%;background:'+barC+'"></div></div>'+barLbl+'</div>'
         +'</div>'
         +'<button class="check-btn'+( isWarn?' warn-btn':'')+(_alreadyTaken?' checked':'')+'" id="cbtn-'+cardIdx+'">'+(_alreadyTaken?'✓':'○')+'</button>';
@@ -1277,12 +1304,6 @@ function renderTodayMeds(){
         /* 刪除 */
         delBtn.onclick=function(){
           showConfirm('確定要刪除「'+mName+'」？\n此操作無法復原。',function(){
-            /* 軟刪除 localStorage */
-            try{
-              var ms=JSON.parse(localStorage.getItem('mm_medications')||'[]');
-              for(var xi=0;xi<ms.length;xi++){if(ms[xi].id===mId){ms[xi].deletedAt=new Date().toISOString();break;}}
-              localStorage.setItem('mm_medications',JSON.stringify(ms));
-            }catch(ex){}
             /* 假資料也移除 */
             for(var da=0;da<DATA.length;da++){
               for(var dr=0;dr<DATA[da].rxList.length;dr++){
@@ -1484,7 +1505,7 @@ function renderCabinet(){
     }
     var g=document.createElement('div');g.className='appt-group';
     var aId=appt.id;
-    var html='<div class="appt-header"><div><div class="appt-name">🏥 '+appt.clinic+(appt.isTemp?'<span style="font-size:10px;background:#fef3c7;color:#b45309;border-radius:999px;padding:1px 7px;margin-left:6px;font-weight:700">臨時</span>':'')+'</div><div class="appt-sub">'+appt.dept+' · '+appt.doctor+'</div></div>'+
+    var html='<div class="appt-header"><div><div class="appt-name">🏥 '+esc(appt.clinic)+(appt.isTemp?'<span style="font-size:10px;background:#fef3c7;color:#b45309;border-radius:999px;padding:1px 7px;margin-left:6px;font-weight:700">臨時</span>':'')+'</div><div class="appt-sub">'+esc(appt.dept)+' · '+esc(appt.doctor)+'</div></div>'+
       '<div style="display:flex;align-items:center;gap:6px">'+
       '<div class="appt-chip">'+(appt.nextVisitDate&&fmtMD(appt.nextVisitDate)!=='—'?'回診 '+fmtMD(appt.nextVisitDate)+nl:'未設回診日')+'</div>'+
       '<button class="del-appt-btn" data-appt-id="'+aId+'" style="width:28px;height:28px;border-radius:50%;border:1.5px solid var(--red);background:transparent;color:var(--red);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>'+
@@ -1501,7 +1522,7 @@ function renderCabinet(){
       var meds2='';
       for(var mi4=0;mi4<rx.meds.length;mi4++){
         var m2=rx.meds[mi4];var st2=stockSt(m2);var dl2=Math.floor(m2.stockQty/m2.dailyDose);
-        meds2+='<div class="med-row"><div class="med-pill" style="background:'+colorBg(m2.color)+'">💊</div><div class="med-info"><div class="med-row-name">'+m2.name+'</div><div class="med-row-meta">'+m2.dose+' · '+freqLbl(m2.freq)+' · '+m2.timing+'</div></div><div class="med-row-stock"><div class="stock-n '+st2+'">'+dl2+'</div><div class="stock-u">天庫存</div></div></div>';
+        meds2+='<div class="med-row"><div class="med-pill" style="background:'+colorBg(m2.color)+'">💊</div><div class="med-info"><div class="med-row-name">'+esc(m2.name)+'</div><div class="med-row-meta">'+esc(m2.dose)+' · '+freqLbl(m2.freq)+' · '+esc(m2.timing)+'</div></div><div class="med-row-stock"><div class="stock-n '+st2+'">'+dl2+'</div><div class="stock-u">天庫存</div></div></div>';
       }
       html+='<div class="rx-card"><div class="rx-dots">'+dots+pl+'</div><div class="rx-meds">'+meds2+'</div></div>';
     }
@@ -1573,7 +1594,7 @@ function makeEv(e){
   var cls=e.type==='visit'?'visit-ev':e.type==='stock'?'stock-ev':'';
   card.className='cal-event-card '+cls;
   var icon=e.type==='visit'?'🏥':e.type==='pickup'?'💊':'⚠️';
-  card.innerHTML='<div class="cal-event-icon">'+icon+'</div><div class="cal-event-body"><div class="cal-event-title">'+e.title+'</div><div class="cal-event-sub">'+e.sub+'</div></div><div class="cal-event-date">'+fmtMD(e.date)+'</div>';
+  card.innerHTML='<div class="cal-event-icon">'+icon+'</div><div class="cal-event-body"><div class="cal-event-title">'+esc(e.title)+'</div><div class="cal-event-sub">'+esc(e.sub)+'</div></div><div class="cal-event-date">'+fmtMD(e.date)+'</div>';
   return card;
 }
 function calNav(dir){calMonth_+=dir;if(calMonth_<0){calMonth_=11;calYear--;}if(calMonth_>11){calMonth_=0;calYear++;}renderCalendar();}
@@ -1610,7 +1631,7 @@ function renderAllergyTags(){
   var c=document.getElementById('allergyTags');c.innerHTML='';
   for(var i=0;i<profile.allergies.length;i++){
     var tag=document.createElement('div');tag.className='allergy-tag';
-    tag.innerHTML=profile.allergies[i]+' <button onclick="removeAllergy('+i+')">x</button>';c.appendChild(tag);
+    tag.innerHTML=esc(profile.allergies[i])+' <button onclick="removeAllergy('+i+')">x</button>';c.appendChild(tag);
   }
 }
 function addAllergy(){var input=document.getElementById('allergyInput'),val=input.value.trim();if(!val)return;if(profile.allergies.indexOf(val)===-1)profile.allergies.push(val);input.value='';renderAllergyTags();}
@@ -1756,20 +1777,6 @@ function stepNext(){
     allAppts.push(newAppt);
     saveData(allAppts);
 
-    /* 也存藥品到 localStorage（備用）*/
-    try{
-      var stored = allAppts;
-      /* stored already saved above */
-      var _dummy = stored;
-      /* 也存藥品 */
-      var storedMeds = JSON.parse(localStorage.getItem('mm_medications')||'[]');
-      for(var smi=0;smi<newMeds.length;smi++){
-        newMeds[smi].prescriptionId = newRx.id;
-        storedMeds.push(newMeds[smi]);
-      }
-      localStorage.setItem('mm_medications', JSON.stringify(storedMeds));
-    }catch(e){}
-
     closeAddModal();
     renderCabinet();
     renderTodayPickup();
@@ -1901,7 +1908,7 @@ function doScanAnalyze(){
 function showScanResult(r){
   var ov=document.getElementById('scanOverlay');ov.classList.add('has-result');
   var fields=[{l:'藥品名稱',v:r.name||'—'},{l:'劑量',v:r.dose||'—'},{l:'頻率',v:r.freq||'—'},{l:'服藥時機',v:r.timing||'—'},{l:'建議庫存',v:r.stock?(r.stock+'顆'):'—'}];
-  var html='';for(var i=0;i<fields.length;i++)html+='<div class="result-field"><span class="result-field-lbl">'+fields[i].l+'</span><span class="result-field-val">'+fields[i].v+'</span></div>';
+  var html='';for(var i=0;i<fields.length;i++)html+='<div class="result-field"><span class="result-field-lbl">'+fields[i].l+'</span><span class="result-field-val">'+esc(fields[i].v)+'</span></div>';
   document.getElementById('scanResultFields').innerHTML=html;
   document.getElementById('scanResultCard').style.display='block';
   document.getElementById('scanHint').textContent='確認後點「套用並開始新增」';
@@ -1955,7 +1962,7 @@ function renderLabResult(r){
   var smMap={normal:{cls:'ok',icon:'✅',title:'整體數值正常'},warn:{cls:'warn',icon:'⚠️',title:'部分項目需注意'},alert:{cls:'alert',icon:'🔴',title:'有異常項目，建議諮詢醫師'}};
   var sm=smMap[r.overallStatus||'warn']||smMap.warn;
   var sc=document.getElementById('labSummaryCard');sc.className='lab-summary-card '+sm.cls;sc.style.display='flex';
-  sc.innerHTML='<div class="lab-sum-icon">'+sm.icon+'</div><div><div class="lab-sum-title">'+sm.title+'</div><div class="lab-sum-sub">'+(r.reportDate?'報告日期：'+r.reportDate+'　':'')+(r.patientName?'姓名：'+r.patientName+'<br>':'')+(r.summary||'')+'</div></div>';
+  sc.innerHTML='<div class="lab-sum-icon">'+sm.icon+'</div><div><div class="lab-sum-title">'+esc(sm.title)+'</div><div class="lab-sum-sub">'+(r.reportDate?'報告日期：'+esc(r.reportDate)+'　':'')+(r.patientName?'姓名：'+r.patientName+'<br>':'')+(r.summary||'')+'</div></div>';
   var cats={};
   var items=r.items||[];for(var i=0;i<items.length;i++){var c=items[i].category||'其他';if(!cats[c])cats[c]=[];cats[c].push(items[i]);}
   var wrap=document.getElementById('labItemsWrap');wrap.innerHTML='';
@@ -1967,12 +1974,12 @@ function renderLabResult(r){
     var sec=document.createElement('div');sec.innerHTML='<div class="lab-sec-title">'+cat+'檢驗</div>';
     for(var ii=0;ii<catItems.length;ii++){
       var item=catItems[ii];var st=item.status||'normal';var tagTxt=st==='high'?'▲ 偏高':st==='low'?'▼ 偏低':'正常';
-      sec.innerHTML+='<div class="lab-item '+st+'"><div class="lab-item-name">'+item.name+'<span class="lab-item-en">'+item.nameEn+'</span></div><div class="lab-item-right"><div class="lab-item-val '+st+'">'+item.value+' '+item.unit+'</div><div class="lab-item-ref">參考：'+item.refRange+'</div></div><span class="lab-item-tag '+st+'">'+tagTxt+'</span></div>';
+      sec.innerHTML+='<div class="lab-item '+st+'"><div class="lab-item-name">'+esc(item.name)+'<span class="lab-item-en">'+esc(item.nameEn)+'</span></div><div class="lab-item-right"><div class="lab-item-val '+st+'">'+item.value+' '+item.unit+'</div><div class="lab-item-ref">參考：'+item.refRange+'</div></div><span class="lab-item-tag '+st+'">'+tagTxt+'</span></div>';
     }
     wrap.appendChild(sec);
   }
   var ab=document.getElementById('labAdviceBox');
-  if(r.advice){ab.style.display='block';ab.innerHTML='<span class="lab-advice-title">💡 醫療提醒</span>'+r.advice;}else{ab.style.display='none';}
+  if(r.advice){ab.style.display='block';ab.innerHTML='<span class="lab-advice-title">💡 醫療提醒</span>'+esc(r.advice);}else{ab.style.display='none';}
 }
 function resetLab(){
   _labImages=[];
@@ -2130,8 +2137,8 @@ function openAddMedModal(pre){
       btn.style.cssText = 'background:var(--bg);border:1.5px solid var(--border);border-radius:11px;padding:11px 13px;cursor:pointer;display:flex;align-items:center;gap:10px';
       btn.innerHTML = '<div style="font-size:20px">📋</div>'
         + '<div style="flex:1;min-width:0">'
-        + '<div style="font-weight:700;font-size:13px;color:var(--ink)">'+amData[ai].clinic+'</div>'
-        + '<div style="font-size:11px;color:var(--ink2)">'+amData[ai].dept+' · 第'+(rx.currentPickup+1)+'次 / 共'+rx.totalPickups+'次</div>'
+        + '<div style="font-weight:700;font-size:13px;color:var(--ink)">'+esc(amData[ai].clinic)+'</div>'
+        + '<div style="font-size:11px;color:var(--ink2)">'+esc(amData[ai].dept)+' · 第'+(rx.currentPickup+1)+'次 / 共'+rx.totalPickups+'次</div>'
         + '</div>'
         + '<div style="font-size:18px" id="rx-check-'+rx.id+'">○</div>';
       (function(rxId, btnEl){
@@ -2673,9 +2680,9 @@ function renderUserList(){
     var isAct=(i===currentUserId);
     var item=document.createElement('div');item.className='us-user-item'+(isAct?' active-user':'');
     var bg=u.avatarColor||AVATAR_COLORS[i%AVATAR_COLORS.length];
-    item.innerHTML='<div class="us-avatar" style="background:'+bg+'">'+(u.name?u.name.charAt(0):String(i+1))+'</div>'
-      +'<div class="us-info"><div class="us-name">'+(u.name||'用藥者 '+(i+1)+'（未設定）')+'</div>'
-      +'<div class="us-rel">'+(u.relation||'用藥者')+(u.ecEmail?'  📧':'')+'</div></div>'
+    item.innerHTML='<div class="us-avatar" style="background:'+bg+'">'+esc(u.name?u.name.charAt(0):String(i+1))+'</div>'
+      +'<div class="us-info"><div class="us-name">'+esc(u.name||'用藥者 '+(i+1)+'（未設定）')+'</div>'
+      +'<div class="us-rel">'+esc(u.relation||'用藥者')+(u.ecEmail?'  📧':'')+'</div></div>'
       +(isAct?'<div class="us-check">✓</div>':'');
     (function(uid){item.onclick=function(){switchUser(uid);};})(i);
     list.appendChild(item);
@@ -2931,6 +2938,7 @@ window.openAddMedModal=openAddMedModal;
 window.closeAddMedModal=closeAddMedModal;
 window.amSelTiming=amSelTiming;
 window.saveAddMed=saveAddMed;
+if('serviceWorker' in navigator&&location.protocol.indexOf('http')===0){window.addEventListener('load',function(){try{syncToWorker();}catch(e){}try{navigator.serviceWorker.register('sw.js');}catch(e){}});}
 </script>
 </body>
 </html>
